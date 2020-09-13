@@ -48,7 +48,7 @@ def main(dataset_path, temp_dir):
                 i = 0
                 sentence = None
                 while flag == 0:
-                    sentence = Sentence(sent[:(len(sent) - i * 50)], use_tokenizer=True)
+                    sentence = Sentence(sent[:(len(sent) - i * 5)], use_tokenizer=True)
                     try:
                         embedding.embed(sentence)
                         flag = 1
@@ -217,7 +217,7 @@ def main(dataset_path, temp_dir):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_path', type=str, default='./data/nyt/')
+    parser.add_argument('--dataset_path', type=str, default='./data/20news/coarse/')
     parser.add_argument('--temp_dir', type=str, default='/tmp/')
     parser.add_argument('--gpu_id', type=str, default="cpu")
     args = parser.parse_args()
