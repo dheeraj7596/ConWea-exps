@@ -10,9 +10,26 @@ from flair.embeddings import BertEmbeddings
 from nltk import sent_tokenize
 from nltk.corpus import stopwords
 from util import *
+import re
+import pandas as pd
 
 
 def main(dataset_path, temp_dir):
+    def preprocess(df):
+        sents = []
+        labels = []
+        for i, row in df.iterrows():
+            line = row["sentence"]
+            line = line.strip()
+            line = " ".join([s for s in line.split() if "@" not in s])
+            line = re.sub(r"[^A-Za-z0-9(),.!?_\"\'`]", " ", line)
+            line = re.sub(r"\s{2,}", " ", line)
+            line = line.strip()
+            sents.append(line)
+            labels.append(row["label"])
+        df = pd.DataFrame.from_dict({"sentence": sents, "label": labels})
+        return df
+
     def dump_bert_vecs(df, dump_dir):
         print("Getting BERT vectors...")
         embedding = BertEmbeddings('bert-base-uncased')
@@ -27,13 +44,18 @@ def main(dataset_path, temp_dir):
             line = row["sentence"]
             sentences = sent_tokenize(line)
             for sentence_ind, sent in enumerate(sentences):
-                sentence = Sentence(sent, use_tokenizer=True)
-                try:
-                    embedding.embed(sentence)
-                except Exception as e:
-                    except_counter += 1
-                    print("Exception Counter while getting BERT: ", except_counter, sentence_ind, index, e)
-                    continue
+                flag = 0
+                i = 0
+                sentence = None
+                while flag == 0:
+                    sentence = Sentence(sent[:(len(sent) - i * 50)], use_tokenizer=True)
+                    try:
+                        embedding.embed(sentence)
+                        flag = 1
+                    except Exception as e:
+                        except_counter += 1
+                        print("Exception Counter while getting BERT: ", except_counter, sentence_ind, index, e)
+                        i += 1
                 for token_ind, token in enumerate(sentence):
                     word = token.text
                     word = word.translate(str.maketrans('', '', string.punctuation))
@@ -183,6 +205,7 @@ def main(dataset_path, temp_dir):
     df = pickle.load(open(pkl_dump_dir + "df.pkl", "rb"))
     with open(pkl_dump_dir + "seedwords.json") as fp:
         label_seedwords_dict = json.load(fp)
+    df = preprocess(df)
     dump_bert_vecs(df, bert_dump_dir)
     tau = compute_tau(label_seedwords_dict, bert_dump_dir)
     print("Cluster Similarity Threshold: ", tau)
