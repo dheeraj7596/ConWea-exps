@@ -48,7 +48,7 @@ def main(dataset_path, temp_dir):
                 i = 0
                 sentence = None
                 while flag == 0:
-                    sentence = Sentence(sent[:(len(sent) - i * 5)], use_tokenizer=True)
+                    sentence = Sentence(sent[:(len(sent) - i * 100)], use_tokenizer=True)
                     try:
                         embedding.embed(sentence)
                         flag = 1
