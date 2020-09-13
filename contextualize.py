@@ -56,6 +56,8 @@ def main(dataset_path, temp_dir):
                         except_counter += 1
                         print("Exception Counter while getting BERT: ", except_counter, sentence_ind, index, e)
                         i += 1
+                if sentence is None or len(sentence) == 0:
+                    print("Length of sentence is 0: ", index)
                 for token_ind, token in enumerate(sentence):
                     word = token.text
                     word = word.translate(str.maketrans('', '', string.punctuation))
