@@ -68,7 +68,7 @@ def get_relevant_dirs(bert_dump_dir):
 
 
 def to_tokenized_string(sentence):
-    tokenized = " ".join([t.text for t in sentence.tokens])
+    tokenized = " ".join(sentence)
     return tokenized
 
 

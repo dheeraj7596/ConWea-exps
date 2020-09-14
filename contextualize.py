@@ -1,12 +1,10 @@
 import argparse
 import json
-import numpy as np
-import flair, torch
+import torch
+from transformers import BertTokenizer, BertModel
 from collections import defaultdict
 from statistics import median
 from sklearn.cluster import KMeans
-from flair.data import Sentence
-from flair.embeddings import BertEmbeddings
 from nltk import sent_tokenize
 from nltk.corpus import stopwords
 from util import *
@@ -14,7 +12,7 @@ import re
 import pandas as pd
 
 
-def main(dataset_path, temp_dir):
+def main(dataset_path, temp_dir, device):
     def preprocess(df):
         sents = []
         labels = []
@@ -30,9 +28,55 @@ def main(dataset_path, temp_dir):
         df = pd.DataFrame.from_dict({"sentence": sents, "label": labels})
         return df
 
-    def dump_bert_vecs(df, dump_dir):
+    def get_word_bert_embeddings(model, tokenizer, sentence):
+        def tensor_to_numpy(tensor):
+            return tensor.clone().detach().cpu().numpy()
+
+        words = []
+        embeddings = []
+        max_tokens = 512 - 2
+        layer = 12
+        tokenized_text = tokenizer.basic_tokenizer.tokenize(sentence, never_split=tokenizer.all_special_tokens)
+        _tokenized_text = []
+        tokenized_to_id_indicies = []
+        check_tokens_id_list = []
+        cur_id_len = 0
+        for index, token in enumerate(tokenized_text):
+            tokens = tokenizer.wordpiece_tokenizer.tokenize(token)
+            if cur_id_len + len(tokens) <= max_tokens:
+                _tokenized_text.append(token)
+                tokenized_to_id_indicies.append((cur_id_len, cur_id_len + len(tokens)))
+                cur_id_len += len(tokens)
+                check_tokens_id_list.extend(tokenizer.convert_tokens_to_ids(tokens))
+            else:
+                break
+        tokenized_text = _tokenized_text
+        del _tokenized_text
+        tokens_id = tokenizer.encode(" ".join(tokenized_text), add_special_tokens=True)
+        assert tokens_id[1: -1] == check_tokens_id_list
+        input_ids = torch.tensor([tokens_id], device=model.device)
+        with torch.no_grad():
+            hidden_states = model(input_ids)
+        all_layer_outputs = hidden_states[2]
+        last_layer = tensor_to_numpy(all_layer_outputs[layer].squeeze(0))[1: -1]
+        for text, (start_index, end_index) in zip(tokenized_text, tokenized_to_id_indicies):
+            word_vec = np.average(last_layer[start_index: end_index], axis=0)
+            try:
+                words.append(text)
+                embeddings.append(word_vec)
+            except:
+                words = [text]
+                embeddings = [word_vec]
+
+        return words, embeddings
+
+    def dump_bert_vecs(df, dump_dir, device):
         print("Getting BERT vectors...")
-        embedding = BertEmbeddings('bert-base-uncased')
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        model = BertModel.from_pretrained('bert-base-uncased', output_hidden_states=True)
+        model = model.to(device)
+        model.eval()
+
         word_counter = defaultdict(int)
         stop_words = set(stopwords.words('english'))
         stop_words.add("would")
@@ -44,22 +88,8 @@ def main(dataset_path, temp_dir):
             line = row["sentence"]
             sentences = sent_tokenize(line)
             for sentence_ind, sent in enumerate(sentences):
-                flag = 0
-                i = 0
-                sentence = None
-                while flag == 0:
-                    sentence = Sentence(sent[:(len(sent) - i * 100)], use_tokenizer=True)
-                    try:
-                        embedding.embed(sentence)
-                        flag = 1
-                    except Exception as e:
-                        except_counter += 1
-                        print("Exception Counter while getting BERT: ", except_counter, sentence_ind, index, e)
-                        i += 1
-                if sentence is None or len(sentence) == 0:
-                    print("Length of sentence is 0: ", index)
-                for token_ind, token in enumerate(sentence):
-                    word = token.text
+                words, embeddings = get_word_bert_embeddings(model, tokenizer, sent)
+                for word, embedding in zip(words, embeddings):
                     word = word.translate(str.maketrans('', '', string.punctuation))
                     if word in stop_words or "/" in word or len(word) == 0:
                         continue
@@ -67,10 +97,9 @@ def main(dataset_path, temp_dir):
                     os.makedirs(word_dump_dir, exist_ok=True)
                     fname = word_dump_dir + "/" + str(word_counter[word]) + ".pkl"
                     word_counter[word] += 1
-                    vec = token.embedding.cpu().numpy()
                     try:
                         with open(fname, "wb") as handler:
-                            pickle.dump(vec, handler)
+                            pickle.dump(embedding, handler)
                     except Exception as e:
                         except_counter += 1
                         print("Exception Counter while dumping BERT: ", except_counter, sentence_ind, index, word, e)
@@ -138,7 +167,7 @@ def main(dataset_path, temp_dir):
                 except_counter += 1
                 print("Exception Counter while clustering: ", except_counter, word_index, e)
 
-    def contextualize(df, cluster_dump_dir):
+    def contextualize(df, cluster_dump_dir, device):
         def get_cluster(tok_vec, cc):
             max_sim = -10
             max_sim_id = -1
@@ -150,7 +179,11 @@ def main(dataset_path, temp_dir):
             return max_sim_id
 
         print("Contextualizing the corpus..")
-        embedding = BertEmbeddings('bert-base-uncased')
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        model = BertModel.from_pretrained('bert-base-uncased', output_hidden_states=True)
+        model = model.to(device)
+        model.eval()
+
         stop_words = set(stopwords.words('english'))
         stop_words.add('would')
         except_counter = 0
@@ -162,10 +195,9 @@ def main(dataset_path, temp_dir):
             line = row["sentence"]
             sentences = sent_tokenize(line)
             for sentence_ind, sent in enumerate(sentences):
-                sentence = Sentence(sent, use_tokenizer=True)
-                embedding.embed(sentence)
-                for token_ind, token in enumerate(sentence):
-                    word = token.text
+                new_sent = []
+                words, embeddings = get_word_bert_embeddings(model, tokenizer, sent)
+                for word, embedding in zip(words, embeddings):
                     if word in stop_words:
                         continue
                     word_clean = word.translate(str.maketrans('', '', string.punctuation))
@@ -194,10 +226,9 @@ def main(dataset_path, temp_dir):
                                     continue
 
                     if len(cc) > 1:
-                        tok_vec = token.embedding.cpu().numpy()
-                        cluster = get_cluster(tok_vec, cc)
-                        sentence.tokens[token_ind].text = word + "$" + str(cluster)
-                sentences[sentence_ind] = to_tokenized_string(sentence)
+                        cluster = get_cluster(embedding, cc)
+                        new_sent.append(word + "$" + str(cluster))
+                sentences[sentence_ind] = to_tokenized_string(new_sent)
             df["sentence"][index] = " . ".join(sentences)
         return df, word_cluster
 
@@ -208,11 +239,11 @@ def main(dataset_path, temp_dir):
     with open(pkl_dump_dir + "seedwords.json") as fp:
         label_seedwords_dict = json.load(fp)
     df = preprocess(df)
-    dump_bert_vecs(df, bert_dump_dir)
+    dump_bert_vecs(df, bert_dump_dir, device)
     tau = compute_tau(label_seedwords_dict, bert_dump_dir)
     print("Cluster Similarity Threshold: ", tau)
     cluster_words(tau, bert_dump_dir, cluster_dump_dir)
-    df_contextualized, word_cluster_map = contextualize(df, cluster_dump_dir)
+    df_contextualized, word_cluster_map = contextualize(df, cluster_dump_dir, device)
     pickle.dump(df_contextualized, open(pkl_dump_dir + "df_contextualized.pkl", "wb"))
     pickle.dump(word_cluster_map, open(pkl_dump_dir + "word_cluster_map.pkl", "wb"))
 
@@ -224,5 +255,7 @@ if __name__ == "__main__":
     parser.add_argument('--gpu_id', type=str, default="cpu")
     args = parser.parse_args()
     if args.gpu_id != "cpu":
-        flair.device = torch.device('cuda:' + str(args.gpu_id))
-    main(dataset_path=args.dataset_path, temp_dir=args.temp_dir)
+        device = torch.device('cuda:' + str(args.gpu_id))
+    else:
+        device = "cpu"
+    main(dataset_path=args.dataset_path, temp_dir=args.temp_dir, device=device)
