@@ -228,6 +228,8 @@ def main(dataset_path, temp_dir, device):
                     if len(cc) > 1:
                         cluster = get_cluster(embedding, cc)
                         new_sent.append(word + "$" + str(cluster))
+                    else:
+                        new_sent.append(word)
                 sentences[sentence_ind] = to_tokenized_string(new_sent)
             df["sentence"][index] = " . ".join(sentences)
         return df, word_cluster
