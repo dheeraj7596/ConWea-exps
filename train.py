@@ -288,10 +288,13 @@ def main(dataset_path, print_flag=True):
 
     pkl_dump_dir = dataset_path
     df = pickle.load(open(pkl_dump_dir + "df_contextualized.pkl", "rb"))
+    df = df[~df.label.isin(["misc"])]
+    df = df.reset_index(drop=True)
     word_cluster = pickle.load(open(pkl_dump_dir + "word_cluster_map.pkl", "rb"))
     with open(pkl_dump_dir + "seedwords.json") as fp:
         label_term_dict = json.load(fp)
 
+    label_term_dict.pop("misc", None)
     label_term_dict = add_all_interpretations(label_term_dict, word_cluster)
     print_label_term_dict(label_term_dict, None, print_components=False)
     labels = list(set(label_term_dict.keys()))
